@@ -1,11 +1,13 @@
 # Fork of konflux-ci/container-build-catalog buildah-remote-oci-ta 0.14.1.
 # Adds an optional registry-distributed buildah layer cache via the CACHE_REPO
 # param and drops the hardcoded --no-cache (which silently disabled
-# --cache-from lookups). CACHE_REPO=auto derives "<image repo>-cache-<hash>"
-# from the BASE_IMAGE value in the first build-args file (the same recipe
-# GitLab CI uses for its cache key). The optional CACHE_EXPIRES_AFTER param
-# sets the quay.expires-after label on the pushed cache images so quay.io
-# garbage-collects stale cache entries. For RHAI-19674.
+# --cache-from lookups). CACHE_REPO=auto stores the cache in the component's
+# own output repository as content-addressed (64-hex) tags - no separate cache
+# repository, because the component's push credential is scoped to exactly
+# that repository and buildah treats a failed cache push as fatal. The
+# optional CACHE_EXPIRES_AFTER param sets the quay.expires-after label on the
+# pushed cache images so quay.io garbage-collects stale cache entries.
+# For RHAI-19674.
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -13,7 +15,7 @@ metadata:
     tekton.dev/pipelines.minVersion: 0.12.1
     tekton.dev/tags: image-build, konflux
   labels:
-    app.kubernetes.io/version: 0.14.1-cache2
+    app.kubernetes.io/version: 0.14.1-cache3
     build.appstudio.redhat.com/build_type: docker
   name: buildah-remote-oci-ta
 spec:
@@ -84,11 +86,11 @@ spec:
   - default: ""
     description: Repository to use for buildah's registry-distributed layer cache
       (--cache-from/--cache-to). When empty, no layer cache is used. When set to
-      'auto', the cache repository is derived as "<image repo>-cache-<hash>",
-      where <hash> is the first 12 characters of the SHA-256 checksum of the
-      BASE_IMAGE value from the first build-args file (the same recipe GitLab
-      CI uses for its cache key). If there is no build-args file, or it has no
-      BASE_IMAGE line, the layer cache is disabled.
+      'auto', the cache is stored in the component's own output repository (the
+      repository part of IMAGE) as content-addressed tags; no separate cache
+      repository is used, because the component's push credential is typically
+      scoped to exactly that repository and buildah treats a failed cache push
+      as fatal.
     name: CACHE_REPO
     type: string
   - default: ""
@@ -529,59 +531,29 @@ spec:
         export IMAGE
       fi
 
-      # RHAI-19674: when CACHE_REPO=auto, derive the cache repository from the
-      # image reference and the BASE_IMAGE value of the first build-args file
-      # (the same recipe GitLab CI uses for its cache key), so that builds
-      # sharing a base image also share a cache repository. This runs before
-      # the remote invocation so both build paths see the resolved value, and
-      # after the IMAGE_APPEND_PLATFORM suffix so each platform gets its own
-      # cache repository.
+      # RHAI-19674: when CACHE_REPO=auto, use the component's own output
+      # repository (the repository part of IMAGE) as the buildah layer cache
+      # repository. The push credential provisioned for a component is
+      # typically a dockerconfigjson scoped to exactly that repository, and
+      # buildah treats a failed cache push as fatal for the whole build, so
+      # the cache must not be pushed anywhere else. No distinguishing suffix
+      # is needed: buildah's cache keys are content-addressed (they hash the
+      # base image diffIDs and history), so base-generation rotation is
+      # inherent, and cache entries are pushed as 64-hex tags. This runs
+      # before the remote invocation so both build paths see the resolved
+      # value, and after the IMAGE_APPEND_PLATFORM suffix so only the tag
+      # part of the reference is affected (the repository part is stable
+      # either way).
       if [ "${CACHE_REPO}" == "auto" ]; then
-        # find the first entry of the BUILD_ARGS_FILES array; the array is
-        # passed to this script as "--build-args-files <entry>..." arguments
-        cache_argfile=""
-        cache_prev_arg=""
-        for cache_arg in "$@"; do
-          if [ "${cache_prev_arg}" == "--build-args-files" ] && [[ "${cache_arg}" != --* ]]; then
-            cache_argfile="${cache_arg}"
-            break
-          fi
-          # also accept the --build-args-files=<file> form
-          if [[ "${cache_arg}" == --build-args-files=* ]]; then
-            cache_argfile="${cache_arg#--build-args-files=}"
-            break
-          fi
-          cache_prev_arg="${cache_arg}"
-        done
-        # konflux-build-cli resolves relative build-args-file paths against the
-        # source directory ($SOURCE_CODE_DIR) relative to its working
-        # directory, which is this step's working directory (/var/workdir)
-        if [ -n "${cache_argfile}" ] && [[ "${cache_argfile}" != /* ]]; then
-          cache_argfile="${SOURCE_CODE_DIR}/${cache_argfile}"
+        cache_repo="${IMAGE%%@*}" # drop a digest, in case the ref has one
+        # strip the tag, but only if the last path component contains a
+        # colon, so that a registry port is not mistaken for a tag
+        cache_last="${cache_repo##*/}"
+        if [[ "${cache_last}" == *:* ]]; then
+          cache_repo="${cache_repo%:*}"
         fi
-        if [ -z "${cache_argfile}" ]; then
-          echo "CACHE_REPO=auto: no build-args file was provided, disabling the layer cache"
-          CACHE_REPO=""
-        elif [ ! -f "${cache_argfile}" ]; then
-          echo "CACHE_REPO=auto: build-args file ${cache_argfile} not found, disabling the layer cache"
-          CACHE_REPO=""
-        elif ! grep -q "^BASE_IMAGE=" "${cache_argfile}"; then
-          echo "CACHE_REPO=auto: no BASE_IMAGE= line in ${cache_argfile}, disabling the layer cache"
-          CACHE_REPO=""
-        else
-          # hash the BASE_IMAGE value exactly like GitLab CI does; the grep
-          # output, including its trailing newline, is what gets hashed
-          cache_hash="$(grep "^BASE_IMAGE=" "${cache_argfile}" | cut -d'=' -f2 | sha256sum | cut -c1-12)"
-          cache_repo="${IMAGE}"
-          # strip the tag, but only if the last path component contains a
-          # colon, so that a registry port is not mistaken for a tag
-          cache_last="${cache_repo##*/}"
-          if [[ "${cache_last}" == *:* ]]; then
-            cache_repo="${cache_repo%:*}"
-          fi
-          CACHE_REPO="${cache_repo}-cache-${cache_hash}"
-          echo "CACHE_REPO=auto: derived ${CACHE_REPO}"
-        fi
+        CACHE_REPO="${cache_repo}"
+        echo "CACHE_REPO=auto: derived ${CACHE_REPO}"
       fi
 
       cat >scripts/script-build.sh <<'REMOTESSHEOF'
