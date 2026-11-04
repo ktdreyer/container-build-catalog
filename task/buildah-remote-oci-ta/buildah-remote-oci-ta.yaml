@@ -1,3 +1,7 @@
+# Fork of konflux-ci/container-build-catalog buildah-remote-oci-ta 0.14.1.
+# Adds an optional registry-distributed buildah layer cache via the CACHE_REPO
+# param and drops the hardcoded --no-cache (which silently disabled
+# --cache-from lookups). For RHAI-19674.
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -5,7 +9,7 @@ metadata:
     tekton.dev/pipelines.minVersion: 0.12.1
     tekton.dev/tags: image-build, konflux
   labels:
-    app.kubernetes.io/version: 0.14.1
+    app.kubernetes.io/version: 0.14.1-cache1
     build.appstudio.redhat.com/build_type: docker
   name: buildah-remote-oci-ta
 spec:
@@ -64,6 +68,11 @@ spec:
     description: Defines the single build time for all buildah builds in seconds since
       UNIX epoch. Conflicts with SOURCE_DATE_EPOCH.
     name: BUILD_TIMESTAMP
+    type: string
+  - default: ""
+    description: Repository to use for buildah's registry-distributed layer cache
+      (--cache-from/--cache-to). When empty, no layer cache is used.
+    name: CACHE_REPO
     type: string
   - default: ""
     description: The image is built from this commit.
@@ -402,6 +411,8 @@ spec:
     env:
     - name: HOME
       value: /root
+    - name: CACHE_REPO
+      value: $(params.CACHE_REPO)
     - name: COMMIT_SHA
       value: $(params.COMMIT_SHA)
     - name: SOURCE_URL
@@ -678,13 +689,19 @@ spec:
         "${sbom_args[@]}"
         --containerfile-json-output /shared/parsed_dockerfile.json
         --resolved-base-images-output /shared/base_images_digests
-        --no-cache
         --ulimits nofile=4096:4096
         --src-tls-verify="$TLSVERIFY"
         --dest-tls-verify="$TLSVERIFY"
         --allow-cross-platform-images="$ALLOW_CROSS_PLATFORM_IMAGES"
         "$@" # --annotations, --labels, --envs, --build-args, --build-args-files
       )
+
+      # RHAI-19674: enable buildah's registry-distributed layer cache when
+      # CACHE_REPO is set. konflux-build-cli passes everything after "--"
+      # verbatim to buildah as extra arguments.
+      if [ -n "${CACHE_REPO}" ]; then
+        cmd+=(-- --layers --cache-from "${CACHE_REPO}" --cache-to "${CACHE_REPO}")
+      fi
 
       echo "[$(date --utc -Ins)] $(printf '%q ' "${cmd[@]}")"
 
@@ -734,6 +751,7 @@ spec:
           -e ALLOW_CROSS_PLATFORM_IMAGES="${ALLOW_CROSS_PLATFORM_IMAGES@Q}" \
           -e ANNOTATIONS_FILE="${ANNOTATIONS_FILE@Q}" \
           -e BUILD_TIMESTAMP="${BUILD_TIMESTAMP@Q}" \
+          -e CACHE_REPO="${CACHE_REPO@Q}" \
           -e CONTEXT="${CONTEXT@Q}" \
           -e CONTEXTUALIZE_SBOM="${CONTEXTUALIZE_SBOM@Q}" \
           -e HERMETIC="${HERMETIC@Q}" \
