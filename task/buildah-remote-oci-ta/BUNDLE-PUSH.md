@@ -17,8 +17,8 @@ podman login quay.io
 (`~/.docker/config.json`) or podman's auth file
 (`~/.config/containers/auth.json`), so after `podman login quay.io` no extra
 flags are needed for the push. (This is how the pushes of `0.14.1-cache1`
-and `0.14.1-cache2` were authenticated: `~/.docker/config.json` did not even
-exist; tkn found quay.io credentials in podman's auth file.)
+through `0.14.1-cache3` were authenticated: `~/.docker/config.json` did not
+even exist; tkn found quay.io credentials in podman's auth file.)
 
 ## Push
 
@@ -28,7 +28,7 @@ From the clone root, with `$REVISION` set to the commit you are publishing
 
 ```
 REVISION=$(git rev-parse HEAD)
-VERSION=0.14.1-cache2
+VERSION=0.14.1-cache3
 
 tkn bundle push \
   --annotate "org.opencontainers.image.source=https://github.com/ktdreyer/container-build-catalog" \
@@ -46,25 +46,25 @@ The annotation set mirrors what upstream's `tkn-bundle` task sets
 the `description` annotation is the first paragraph of the task's
 `spec.description`.
 
-The exact invocation used to publish `0.14.1-cache2` (revision
-`bbdc8b8a4841a5f7115461c747c93a8d3ad8301c`) was:
+The exact invocation used to publish `0.14.1-cache3` (revision
+`6bddec84ae03eb666e539c2fc0249c551ea9ae51`) was:
 
 ```
 tkn bundle push \
   --annotate "org.opencontainers.image.source=https://github.com/ktdreyer/container-build-catalog" \
-  --annotate "org.opencontainers.image.revision=bbdc8b8a4841a5f7115461c747c93a8d3ad8301c" \
-  --annotate "org.opencontainers.image.url=https://github.com/ktdreyer/container-build-catalog/tree/bbdc8b8a4841a5f7115461c747c93a8d3ad8301c/task/buildah-remote-oci-ta" \
-  --annotate "org.opencontainers.image.documentation=https://github.com/ktdreyer/container-build-catalog/tree/bbdc8b8a4841a5f7115461c747c93a8d3ad8301c/task/buildah-remote-oci-ta/README.md" \
+  --annotate "org.opencontainers.image.revision=6bddec84ae03eb666e539c2fc0249c551ea9ae51" \
+  --annotate "org.opencontainers.image.url=https://github.com/ktdreyer/container-build-catalog/tree/6bddec84ae03eb666e539c2fc0249c551ea9ae51/task/buildah-remote-oci-ta" \
+  --annotate "org.opencontainers.image.documentation=https://github.com/ktdreyer/container-build-catalog/tree/6bddec84ae03eb666e539c2fc0249c551ea9ae51/task/buildah-remote-oci-ta/README.md" \
   --annotate "org.opencontainers.image.description=Buildah task builds source code into a container image and pushes the image into container registry using buildah tool." \
-  --annotate "org.opencontainers.image.version=0.14.1-cache2" \
-  quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache2 \
+  --annotate "org.opencontainers.image.version=0.14.1-cache3" \
+  quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache3 \
   -f task/buildah-remote-oci-ta/buildah-remote-oci-ta.yaml
 ```
 
 It printed:
 
 ```
-Pushed Tekton Bundle to quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta@sha256:55956e770893d9fb29286041d5650a8c3b9741467ed1da65d0f274c0baec120e
+Pushed Tekton Bundle to quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta@sha256:3c049e798659306cda516ee94ed243e893e33b2bca012bcc850bd2f700f1c5a8
 ```
 
 ## Verify
@@ -75,8 +75,8 @@ Inspect the tag (shows the digest and confirms anonymous pulls work). The
 OCI annotations are on the image *manifest*, so use `--raw` to see them:
 
 ```
-skopeo inspect --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache2
-skopeo inspect --raw --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache2 | python3 -m json.tool
+skopeo inspect --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache3
+skopeo inspect --raw --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache3 | python3 -m json.tool
 ```
 
 Pull the bundle back anonymously and diff the embedded task against the YAML
@@ -85,7 +85,7 @@ than the raw text:
 
 ```
 skopeo copy --src-no-creds \
-  docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache2 \
+  docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache3 \
   dir:/tmp/bundle
 LAYER_DIGEST=$(python3 -c "import json; print(json.load(open('/tmp/bundle/manifest.json'))['layers'][0]['digest'].split(':')[1])")
 mkdir /tmp/bundle-layer && tar -xzf "/tmp/bundle/${LAYER_DIGEST}" -C /tmp/bundle-layer
