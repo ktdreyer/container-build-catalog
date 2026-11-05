@@ -15,7 +15,7 @@ metadata:
     tekton.dev/pipelines.minVersion: 0.12.1
     tekton.dev/tags: image-build, konflux
   labels:
-    app.kubernetes.io/version: 0.14.1-cache3
+    app.kubernetes.io/version: 0.14.1-cache4
     build.appstudio.redhat.com/build_type: docker
   name: buildah-remote-oci-ta
 spec:
@@ -254,6 +254,15 @@ spec:
       as per --squash
     name: SQUASH
     type: string
+  - default: "false"
+    description: Make the final image labels cache-stable (RHAI-19674). buildah's
+      layer cache key includes the rendered LABEL instruction text, so per-build
+      label values (created timestamp, revision) bust the final step and force a
+      cold rootfs diff walk. When true, omit the per-commit labels (revision,
+      vcs-ref, build-date) and pin org.opencontainers.image.created to epoch 0
+      via --source-date-epoch.
+    name: STABLE_LABELS
+    type: string
   - default: overlay
     description: Storage driver to configure for buildah
     name: STORAGE_DRIVER
@@ -368,6 +377,8 @@ spec:
       value: source
     - name: SQUASH
       value: $(params.SQUASH)
+    - name: STABLE_LABELS
+      value: $(params.STABLE_LABELS)
     - name: STORAGE_DRIVER
       value: $(params.STORAGE_DRIVER)
     - name: TARGET_STAGE
@@ -708,16 +719,12 @@ spec:
         --workdir-mount "$WORKINGDIR_MOUNT"
         --target "$TARGET_STAGE"
         --inherit-labels="$INHERIT_BASE_IMAGE_LABELS"
-        --source-date-epoch "$BUILDAH_SOURCE_DATE_EPOCH"
         --rewrite-timestamp="$BUILDAH_REWRITE_TIMESTAMP"
         --squash="$SQUASH"
         --omit-history="$BUILDAH_OMIT_HISTORY"
         --image-source "$SOURCE_URL"
-        --image-revision "$COMMIT_SHA"
         --quay-image-expires-after "$IMAGE_EXPIRES_AFTER"
         --annotations-file "$ANNOTATIONS_FILE"
-        --legacy-build-timestamp "$BUILD_TIMESTAMP"
-        --add-legacy-labels
         --include-legacy-buildinfo-path="$ICM_KEEP_COMPAT_LOCATION"
         --skip-injections="$SKIP_INJECTIONS"
         --skip-unused-stages="$SKIP_UNUSED_STAGES"
@@ -741,6 +748,26 @@ spec:
         --allow-cross-platform-images="$ALLOW_CROSS_PLATFORM_IMAGES"
         "$@" # --annotations, --labels, --envs, --build-args, --build-args-files
       )
+
+      # RHAI-19674: STABLE_LABELS makes the synthetic final LABEL step
+      # cache-stable. buildah's --layers cache key includes the rendered
+      # LABEL instruction text, so any per-build-changing label value busts
+      # the step and forces a cold rootfs diff walk. Pin created to epoch 0
+      # (--source-date-epoch takes precedence over the wall clock in
+      # konflux-build-cli) and omit the per-commit labels. The non-stable
+      # path is unchanged.
+      if [ "${STABLE_LABELS}" = "true" ]; then
+        cmd+=(
+          --source-date-epoch 0
+        )
+      else
+        cmd+=(
+          --source-date-epoch "$BUILDAH_SOURCE_DATE_EPOCH"
+          --image-revision "$COMMIT_SHA"
+          --legacy-build-timestamp "$BUILD_TIMESTAMP"
+          --add-legacy-labels
+        )
+      fi
 
       # RHAI-19674: enable buildah's registry-distributed layer cache when
       # CACHE_REPO is set. konflux-build-cli passes everything after "--"
@@ -825,6 +852,7 @@ spec:
           -e SKIP_UNUSED_STAGES="${SKIP_UNUSED_STAGES@Q}" \
           -e SOURCE_CODE_DIR="${SOURCE_CODE_DIR@Q}" \
           -e SQUASH="${SQUASH@Q}" \
+          -e STABLE_LABELS="${STABLE_LABELS@Q}" \
           -e STORAGE_DRIVER="${STORAGE_DRIVER@Q}" \
           -e TARGET_STAGE="${TARGET_STAGE@Q}" \
           -e TASKRUN_NAME="${TASKRUN_NAME@Q}" \
