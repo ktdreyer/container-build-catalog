@@ -17,7 +17,7 @@ podman login quay.io
 (`~/.docker/config.json`) or podman's auth file
 (`~/.config/containers/auth.json`), so after `podman login quay.io` no extra
 flags are needed for the push. (This is how the pushes of `0.14.1-cache1`
-through `0.14.1-cache3` were authenticated: `~/.docker/config.json` did not
+through `0.14.1-cache4` were authenticated: `~/.docker/config.json` did not
 even exist; tkn found quay.io credentials in podman's auth file.)
 
 ## Push
@@ -28,7 +28,7 @@ From the clone root, with `$REVISION` set to the commit you are publishing
 
 ```
 REVISION=$(git rev-parse HEAD)
-VERSION=0.14.1-cache3
+VERSION=0.14.1-cache4
 
 tkn bundle push \
   --annotate "org.opencontainers.image.source=https://github.com/ktdreyer/container-build-catalog" \
@@ -67,6 +67,36 @@ It printed:
 Pushed Tekton Bundle to quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta@sha256:3c049e798659306cda516ee94ed243e893e33b2bca012bcc850bd2f700f1c5a8
 ```
 
+## 0.14.1-cache4
+
+Added the `STABLE_LABELS` param (default `"false"`) for RHAI-19674. When
+`"true"`, the build omits the per-commit label flags (`--image-revision`,
+`--legacy-build-timestamp`, `--add-legacy-labels`) and passes
+`--source-date-epoch 0`, so the synthetic final LABEL instruction is
+byte-identical across builds and buildah's `--layers` cache can hit it instead
+of paying a cold rootfs diff walk. The non-stable path is unchanged.
+
+The exact invocation used to publish `0.14.1-cache4` (revision
+`99ce5b6f2044a8b7216103c776b217be6b0a5f53`) was:
+
+```
+tkn bundle push \
+  --annotate "org.opencontainers.image.source=https://github.com/ktdreyer/container-build-catalog" \
+  --annotate "org.opencontainers.image.revision=99ce5b6f2044a8b7216103c776b217be6b0a5f53" \
+  --annotate "org.opencontainers.image.url=https://github.com/ktdreyer/container-build-catalog/tree/99ce5b6f2044a8b7216103c776b217be6b0a5f53/task/buildah-remote-oci-ta" \
+  --annotate "org.opencontainers.image.documentation=https://github.com/ktdreyer/container-build-catalog/tree/99ce5b6f2044a8b7216103c776b217be6b0a5f53/task/buildah-remote-oci-ta/README.md" \
+  --annotate "org.opencontainers.image.description=Buildah task builds source code into a container image and pushes the image into container registry using buildah tool." \
+  --annotate "org.opencontainers.image.version=0.14.1-cache4" \
+  quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache4 \
+  -f task/buildah-remote-oci-ta/buildah-remote-oci-ta.yaml
+```
+
+It printed:
+
+```
+Pushed Tekton Bundle to quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta@sha256:f5a99ef21b26802915a0b97f4ae77434fba221fb915f8e514af7ea5be3a1aca5
+```
+
 ## Verify
 
 The quay repository is public, so everything can be verified anonymously.
@@ -75,8 +105,8 @@ Inspect the tag (shows the digest and confirms anonymous pulls work). The
 OCI annotations are on the image *manifest*, so use `--raw` to see them:
 
 ```
-skopeo inspect --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache3
-skopeo inspect --raw --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache3 | python3 -m json.tool
+skopeo inspect --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache4
+skopeo inspect --raw --no-creds docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache4 | python3 -m json.tool
 ```
 
 Pull the bundle back anonymously and diff the embedded task against the YAML
@@ -85,7 +115,7 @@ than the raw text:
 
 ```
 skopeo copy --src-no-creds \
-  docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache3 \
+  docker://quay.io/ktdreyer/tekton-catalog/task-buildah-remote-oci-ta:0.14.1-cache4 \
   dir:/tmp/bundle
 LAYER_DIGEST=$(python3 -c "import json; print(json.load(open('/tmp/bundle/manifest.json'))['layers'][0]['digest'].split(':')[1])")
 mkdir /tmp/bundle-layer && tar -xzf "/tmp/bundle/${LAYER_DIGEST}" -C /tmp/bundle-layer
